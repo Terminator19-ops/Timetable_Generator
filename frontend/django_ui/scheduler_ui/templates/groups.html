@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exam Timetable Generator - Groups</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Exam Timetable Generator</h1>
+            <nav>
+                <a href="/">Configuration</a>
+                <a href="/groups/" class="active">Groups</a>
+                <a href="/generate/">Generate</a>
+            </nav>
+        </header>
+
+        <main>
+            <h2>Student Groups Management</h2>
+            
+            <div class="form-section">
+                <h3>Add New Group</h3>
+                <form id="groupForm">
+                    <div class="form-group">
+                        <label for="groupName">Group Name:</label>
+                        <input type="text" id="groupName" name="groupName" required placeholder="e.g., CS-A">
+                    </div>
+                    <div class="form-group">
+                        <label for="groupSize">Group Size:</label>
+                        <input type="number" id="groupSize" name="groupSize" min="1" required placeholder="Number of students">
+                    </div>
+                    <div class="form-group">
+                        <label for="groupSubjects">Subjects:</label>
+                        <select id="groupSubjects" name="groupSubjects" multiple size="8" required>
+                            <!-- Will be populated dynamically -->
+                        </select>
+                        <small>Hold Ctrl (Cmd on Mac) to select multiple subjects</small>
+                    </div>
+                    <div class="button-group">
+                        <button type="submit" class="btn-primary">Add Group</button>
+                    </div>
+                </form>
+            </div>
+
+            <div class="form-section">
+                <h3>Existing Groups</h3>
+                <div id="groupsList">
+                    <p class="empty-message">No groups added yet. Add your first group above.</p>
+                </div>
+            </div>
+
+            <div id="message" class="message"></div>
+        </main>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8000';
+
+        function showMessage(text, type = 'success') {
+            const messageDiv = document.getElementById('message');
+            messageDiv.textContent = text;
+            messageDiv.className = `message ${type}`;
+            setTimeout(() => {
+                messageDiv.className = 'message';
+            }, 5000);
+        }
+
+        async function loadSubjects() {
+            try {
+                const response = await fetch(`${API_URL}/api/subjects`);
+                if (response.ok) {
+                    const subjects = await response.json();
+                    const select = document.getElementById('groupSubjects');
+                    select.innerHTML = '';
+                    subjects.forEach(subject => {
+                        const option = document.createElement('option');
+                        option.value = subject;
+                        option.textContent = subject;
+                        select.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('Error loading subjects:', error);
+                showMessage('Error loading subjects. Please configure system first.', 'error');
+            }
+        }
+
+        async function loadGroups() {
+            try {
+                const response = await fetch(`${API_URL}/api/config`);
+                if (response.ok) {
+                    const config = await response.json();
+                    displayGroups(config.groups || []);
+                }
+            } catch (error) {
+                console.error('Error loading groups:', error);
+            }
+        }
+
+        function displayGroups(groups) {
+            const groupsList = document.getElementById('groupsList');
+            if (groups.length === 0) {
+                groupsList.innerHTML = '<p class="empty-message">No groups added yet. Add your first group above.</p>';
+                return;
+            }
+
+            groupsList.innerHTML = '';
+            groups.forEach(group => {
+                const groupCard = document.createElement('div');
+                groupCard.className = 'group-card';
+                groupCard.innerHTML = `
+                    <div class="group-header">
+                        <h4>${group.name}</h4>
+                        <button class="btn-remove" onclick="deleteGroup('${group.name}')">Delete</button>
+                    </div>
+                    <div class="group-details">
+                        <p><strong>Size:</strong> ${group.size} students</p>
+                        <p><strong>Subjects:</strong> ${group.subjects.join(', ')}</p>
+                    </div>
+                `;
+                groupsList.appendChild(groupCard);
+            });
+        }
+
+        async function deleteGroup(groupName) {
+            if (!confirm(`Are you sure you want to delete group "${groupName}"?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/api/groups/${encodeURIComponent(groupName)}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    showMessage(`Group "${groupName}" deleted successfully`, 'success');
+                    loadGroups();
+                } else {
+                    const error = await response.json();
+                    // Handle different error formats
+                    let errorMessage = 'Unknown error';
+                    if (typeof error.detail === 'string') {
+                        errorMessage = error.detail;
+                    } else if (Array.isArray(error.detail)) {
+                        errorMessage = error.detail.map(e => `${e.loc.join('.')}: ${e.msg}`).join('; ');
+                    } else if (error.detail && typeof error.detail === 'object') {
+                        errorMessage = JSON.stringify(error.detail);
+                    } else if (error.message) {
+                        errorMessage = error.message;
+                    }
+                    showMessage(`Error: ${errorMessage}`, 'error');
+                }
+            } catch (error) {
+                showMessage(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        document.getElementById('groupForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const name = document.getElementById('groupName').value.trim();
+            const size = parseInt(document.getElementById('groupSize').value);
+            const subjectsSelect = document.getElementById('groupSubjects');
+            const subjects = Array.from(subjectsSelect.selectedOptions).map(opt => opt.value);
+
+            if (subjects.length === 0) {
+                showMessage('Please select at least one subject', 'error');
+                return;
+            }
+
+            const groupData = { name, size, subjects };
+
+            try {
+                const response = await fetch(`${API_URL}/api/groups`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(groupData)
+                });
+
+                if (response.ok) {
+                    showMessage(`Group "${name}" added successfully!`, 'success');
+                    document.getElementById('groupForm').reset();
+                    loadGroups();
+                } else {
+                    const error = await response.json();
+                    // Handle different error formats
+                    let errorMessage = 'Unknown error';
+                    if (typeof error.detail === 'string') {
+                        errorMessage = error.detail;
+                    } else if (Array.isArray(error.detail)) {
+                        // Pydantic validation errors
+                        errorMessage = error.detail.map(e => `${e.loc.join('.')}: ${e.msg}`).join('; ');
+                    } else if (error.detail && typeof error.detail === 'object') {
+                        errorMessage = JSON.stringify(error.detail);
+                    } else if (error.message) {
+                        errorMessage = error.message;
+                    }
+                    showMessage(`Error: ${errorMessage}`, 'error');
+                }
+            } catch (error) {
+                showMessage(`Error: ${error.message}`, 'error');
+            }
+        });
+
+        // Load data on page load
+        window.addEventListener('load', () => {
+            loadSubjects();
+            loadGroups();
+        });
+    </script>
+</body>
+</html>

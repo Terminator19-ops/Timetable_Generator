@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exam Timetable Generator - Generate</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Exam Timetable Generator</h1>
+            <nav>
+                <a href="/">Configuration</a>
+                <a href="/groups/">Groups</a>
+                <a href="/generate/" class="active">Generate</a>
+            </nav>
+        </header>
+
+        <main>
+            <h2>Generate Timetable</h2>
+            
+            <div class="button-group">
+                <button id="generateBtn" class="btn-primary">Generate Timetable</button>
+                <button id="exportBtn" class="btn-secondary" style="display: none;">Export to CSV</button>
+            </div>
+
+            <div id="loading" class="loading" style="display: none;">
+                <div class="spinner"></div>
+                <p>Generating timetable... Please wait.</p>
+            </div>
+
+            <div id="message" class="message"></div>
+
+            <div id="results" style="display: none;">
+                <div class="form-section">
+                    <h3>Exam Timetable</h3>
+                    <div id="timetableGrid"></div>
+                </div>
+
+                <div class="form-section">
+                    <h3>Hall Allocations</h3>
+                    <div id="hallAllocations"></div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8000';
+
+        function showMessage(text, type = 'success') {
+            const messageDiv = document.getElementById('message');
+            messageDiv.textContent = text;
+            messageDiv.className = `message ${type}`;
+            setTimeout(() => {
+                messageDiv.className = 'message';
+            }, 5000);
+        }
+
+        function showLoading(show = true) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+            document.getElementById('generateBtn').disabled = show;
+        }
+
+        async function generateTimetable() {
+            showLoading(true);
+            document.getElementById('results').style.display = 'none';
+            document.getElementById('exportBtn').style.display = 'none';
+
+            try {
+                // Get configuration
+                const configResponse = await fetch(`${API_URL}/api/config`);
+                if (!configResponse.ok) {
+                    throw new Error('Configuration not found. Please configure the system first.');
+                }
+
+                const config = await configResponse.json();
+
+                if (!config.subjects || config.subjects.length === 0) {
+                    throw new Error('No subjects configured. Please add subjects first.');
+                }
+
+                if (!config.groups || config.groups.length === 0) {
+                    throw new Error('No groups configured. Please add groups first.');
+                }
+
+                if (!config.halls || config.halls.length === 0) {
+                    throw new Error('No halls configured. Please add halls first.');
+                }
+
+                // Prepare request
+                const requestData = {
+                    timetable_config: {
+                        days: config.days,
+                        slots_per_day: config.slots_per_day,
+                        subjects: config.subjects,
+                        groups: config.groups,
+                        random_seed: config.random_seed
+                    },
+                    hall_config: {
+                        halls: config.halls,
+                        per_subject_limit: config.per_subject_limit
+                    }
+                };
+
+                // Generate timetable
+                const response = await fetch(`${API_URL}/api/generate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestData)
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    // Handle different error formats
+                    let errorMsg = 'Generation failed';
+                    if (typeof error.detail === 'string') {
+                        errorMsg = error.detail;
+                    } else if (Array.isArray(error.detail)) {
+                        errorMsg = error.detail.map(e => `${e.loc.join('.')}: ${e.msg}`).join('; ');
+                    } else if (error.detail?.message) {
+                        errorMsg = error.detail.message;
+                    } else if (error.detail && typeof error.detail === 'object') {
+                        errorMsg = JSON.stringify(error.detail);
+                    } else if (error.message) {
+                        errorMsg = error.message;
+                    }
+                    throw new Error(errorMsg);
+                }
+
+                const result = await response.json();
+                displayResults(result);
+                showMessage('Timetable generated successfully!', 'success');
+                document.getElementById('exportBtn').style.display = 'inline-block';
+
+            } catch (error) {
+                showMessage(`Error: ${error.message}`, 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function displayResults(result) {
+            displayTimetable(result.timetable);
+            displayHallAllocations(result.hall_allocations);
+            document.getElementById('results').style.display = 'block';
+        }
+
+        function displayTimetable(timetable) {
+            const grid = document.getElementById('timetableGrid');
+            
+            // Create table
+            let html = '<table class="timetable-table"><thead><tr><th>Day</th><th>Slot</th><th>Subject</th></tr></thead><tbody>';
+            
+            // Sort assignments by day and slot
+            const sorted = timetable.assignments.sort((a, b) => {
+                if (a.day !== b.day) return a.day - b.day;
+                return a.slot - b.slot;
+            });
+
+            sorted.forEach(assignment => {
+                html += `
+                    <tr>
+                        <td>Day ${assignment.day}</td>
+                        <td>Slot ${assignment.slot}</td>
+                        <td><strong>${assignment.subject}</strong></td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table>';
+            grid.innerHTML = html;
+        }
+
+        function displayHallAllocations(allocations) {
+            const container = document.getElementById('hallAllocations');
+            
+            if (allocations.length === 0) {
+                container.innerHTML = '<p>No hall allocations.</p>';
+                return;
+            }
+
+            // Group by day and slot
+            const grouped = {};
+            allocations.forEach(alloc => {
+                const key = `Day ${alloc.day} - Slot ${alloc.slot}`;
+                if (!grouped[key]) grouped[key] = [];
+                grouped[key].push(alloc);
+            });
+
+            let html = '';
+            Object.entries(grouped).forEach(([key, allocs]) => {
+                html += `<div class="hall-group">
+                    <h4>${key}</h4>
+                    <table class="hall-table">
+                        <thead>
+                            <tr>
+                                <th>Hall</th>
+                                <th>Subject</th>
+                                <th>Students</th>
+                            </tr>
+                        </thead>
+                        <tbody>`;
+                
+                allocs.forEach(alloc => {
+                    alloc.allocations.forEach(allocation => {
+                        html += `
+                            <tr>
+                                <td>${alloc.hall}</td>
+                                <td>${allocation.subject}</td>
+                                <td>${allocation.students}</td>
+                            </tr>
+                        `;
+                    });
+                });
+
+                html += '</tbody></table></div>';
+            });
+
+            container.innerHTML = html;
+        }
+
+        async function exportToCSV() {
+            try {
+                const response = await fetch(`${API_URL}/api/export/csv`);
+                if (!response.ok) {
+                    throw new Error('Export failed');
+                }
+
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'timetable_export.csv';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+
+                showMessage('CSV exported successfully!', 'success');
+            } catch (error) {
+                showMessage(`Export error: ${error.message}`, 'error');
+            }
+        }
+
+        document.getElementById('generateBtn').addEventListener('click', generateTimetable);
+        document.getElementById('exportBtn').addEventListener('click', exportToCSV);
+    </script>
+</body>
+</html>

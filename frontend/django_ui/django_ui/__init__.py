@@ -1,0 +1,1 @@
+"""Django UI package initialization."""
