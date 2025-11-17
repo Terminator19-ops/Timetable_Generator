@@ -57,13 +57,126 @@ frontend/
   django_ui/   ← UI templates + views
 ```
 
-## 7. Limitations
+## 7. Flowchart
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Exam Timetable Generator                     │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   User Enters Configuration                     │
+│              (Days, Slots, Subjects, Halls, Groups)             │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Django Frontend (UI)                         │
+│                    POST /api/config                             │
+│                    POST /api/groups                             │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                       FastAPI Backend                           │
+│                  Validate & Store Config                        │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  User Clicks "Generate"                         │
+│                   POST /api/generate                            │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   Timetable Scheduler                           │
+│              Build Conflict Graph from Groups                   │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│               Pick Next Subject (MRV Heuristic)                 │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                    ┌─────────────────┐
+                    │  Valid Slot for │
+                    │    Subject?     │
+                    └─────────────────┘
+                         /         \
+                       No           Yes
+                      /               \
+                     ▼                 ▼
+          ┌──────────────────┐   ┌────────────────────────┐
+          │    Backtrack     │   │   Assign Slot and      │
+          │  Try Another     │   │   Forward Check        │
+          │      Slot        │   │ (Remove from Conflicts)│
+          └──────────────────┘   └────────────────────────┘
+                     │                      │
+                     └──────────┬───────────┘
+                                ▼
+                      ┌───────────────────┐
+                      │  All Subjects     │
+                      │    Assigned?      │
+                      └───────────────────┘
+                           /         \
+                         No           Yes
+                        /               \
+                       ▼                 ▼
+            ┌────────────────┐   ┌──────────────────────┐
+            │ Continue Loop  │   │   Hall Allocator     │
+            │ Next Subject   │   │  For Each Time Slot  │
+            └────────────────┘   └──────────────────────┘
+                                          │
+                                          ▼
+                              ┌───────────────────────┐
+                              │ Count Students per    │
+                              │ Subject in Each Slot  │
+                              └───────────────────────┘
+                                          │
+                                          ▼
+                              ┌───────────────────────┐
+                              │  Greedy Allocation    │
+                              │ Fill Halls by Capacity│
+                              │  (Respect Limits)     │
+                              └───────────────────────┘
+                                          │
+                                          ▼
+                              ┌───────────────────────┐
+                              │ Sufficient Capacity?  │
+                              └───────────────────────┘
+                                     /         \
+                                   No           Yes
+                                  /               \
+                                 ▼                 ▼
+                    ┌──────────────────┐   ┌──────────────────┐
+                    │  Return Error    │   │ Return Timetable │
+                    │ (422 Response)   │   │ and Hall         │
+                    └──────────────────┘   │ Allocations      │
+                                           └──────────────────┘
+                                                    │
+                                                    ▼
+                                        ┌───────────────────────┐
+                                        │  Display in Frontend  │
+                                        │  Show Tables + Export │
+                                        └───────────────────────┘
+                                                    │
+                                                    ▼
+                                        ┌───────────────────────┐
+                                        │   User Downloads CSV  │
+                                        │   GET /api/export/csv │
+                                        └───────────────────────┘
+```
+
+## 8. Limitations
 
 - No database (in-memory storage)
 - Not optimized for large inputs
 - Simple algorithm, not meant for large-scale timetabling
 - No authentication/security implemented
 
-## 8. Conclusion
+## 9. Conclusion
 
 This project demonstrates a basic scheduling architecture using separate UI, API, and logic layers. It is suitable for small-scale exam scheduling and provides a clear, maintainable structure for future improvements.
